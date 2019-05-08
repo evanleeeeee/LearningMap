@@ -67,20 +67,11 @@ var iphoneXFirstPass = true;
 
         var additionalJs = $axure.document.additionalJs;
         if (additionalJs != null) {
-            var total = additionalJs.length;
-            if (total > 0) $.holdReady(true);            
             $.each(additionalJs, function (index, value) {
                 var script = window.document.createElement("script");
                 script.type = "text/javascript";
                 script.src = value;
                 script.async = false;
-                script.onload = script.onreadystatechange = function (e) {
-                    if (!script.readyState || /loaded|complete/.test(script.readyState)) {
-                        script.onload = script.onreadystatechange = null;
-                        script = undefined;
-                    }
-                    if (--total == 0) $.holdReady(false);
-                }
                 window.document.head.appendChild(script);
             });
         }
@@ -679,7 +670,7 @@ var iphoneXFirstPass = true;
         // Special cases for Centered Page
         var isCentered = $($iframe[0].document.body).css('position') == 'relative';
         if (isCentered && scaleVal == 1) leftPos = 0;
-        else if (isCentered && scaleVal == 2) leftPos = $('#mainPanelContainer').width() * scale / 2.0 - contentLeftOfOriginOffset;
+        else if (isCentered && scaleVal == 2) leftPos = $('#mainPanelContainer').width() / 2.0 - contentLeftOfOriginOffset;
 
         return {
             left: leftPos,
@@ -915,14 +906,11 @@ var iphoneXFirstPass = true;
         var mainPanelWidth = $('#mainPanel').width();
         var mainPanelHeight = $('#mainPanel').height();
         
-        if (!w || !clipToView) w = mainPanelWidth;
-        if (!h || !clipToView) h = mainPanelHeight;
-        if (MOBILE_DEVICE && h > mainPanelHeight) h = mainPanelHeight;
-        if (MOBILE_DEVICE && w > mainPanelWidth) w = mainPanelWidth;
+        var frameWidth = w;
+        if (!w || !clipToView || (w > mainPanelWidth)) w = mainPanelWidth;
+        if (!h || !clipToView || (h > mainPanelHeight)) h = mainPanelHeight;
 
         if (clipToView) {
-            if (scaleVal == '0') scaleVal = 2;
-
             w = Number(w);
             h = Number(h);
 
@@ -931,18 +919,15 @@ var iphoneXFirstPass = true;
             $('#mainFrame').height(h);
             $('#clipFrameScroll').height(h);
 
-            var topPadding = 10;
+            var topPadding = 0;
             var leftPadding = 0;
             var rightPadding = 0;
-            var bottomPadding = 10;
-
-            if (!MOBILE_DEVICE) {
-                w = w + leftPadding + rightPadding;
-                h = h + topPadding + bottomPadding;
-            }
+            var bottomPadding = 0;
 
             var x = (mainPanelWidth - w) / 2;
+            x = x - leftPadding;
             var y = (mainPanelHeight - h) / 2 - 1;
+            y = y - topPadding;
 
             x = Math.max(0, x);
             if (scaleVal != 2) y = Math.max(0, y);
@@ -957,8 +942,8 @@ var iphoneXFirstPass = true;
                 'top': topPadding + 'px'
             });
 
-            $('#mainPanelContainer').width(w);
-            $('#mainPanelContainer').height(h);
+            $('#mainPanelContainer').width(w + leftPadding + rightPadding);
+            $('#mainPanelContainer').height(h + topPadding + bottomPadding);
         } else {
             $('#mainFrame').width('100%');
             $('#mainFrame').height(h);
@@ -992,6 +977,7 @@ var iphoneXFirstPass = true;
         var $rightPanel = $('.rightPanel:visible');
         var rightPanelOffset = (!isMobileMode() && $rightPanel.length > 0) ? $rightPanel.width() : 0;
 
+        if (clipToView) scaleVal = 0;
         var vpScaleData = {
             scale: scaleVal,
             prevScaleN: prevScaleN,
@@ -1001,6 +987,13 @@ var iphoneXFirstPass = true;
             clipToView: clipToView
         };
         $axure.messageCenter.postMessage('getScale', vpScaleData);
+
+        var mainPanelScale = {
+            scaleN: newScaleN,
+            prevScaleN: prevScaleN
+        };
+        repositionPinsOnScaleChange(mainPanelScale);
+        repositionClippingBoundsScroll();
 
         if (scaleVal == '0' && clipToView) $('#mainPanel').css('overflow', 'auto');
         else $('#mainPanel').css('overflow', '');
@@ -1858,17 +1851,8 @@ var iphoneXFirstPass = true;
     function repositionPinsOnScaleChange(data) {
         var $pins = $('#existingPinsOverlay').children();
         for (var i = 0; i < $pins.length; i++) {
-            // calculate new position of pin
-            const left = parseFloat($($pins[i]).css('left'));
-            const top = parseFloat($($pins[i]).css('top'));
-            const width = $($pins[i]).width();
-            const height = $($pins[i]).height();
-            // we should scale center of pin instead of left top corner
-            const scaledLeft = ((left + (width / 2)) * data.scaleN / data.prevScaleN) - (width / 2);
-            const scaledTop = ((top + (height / 2)) * data.scaleN / data.prevScaleN) - (height / 2);
-
-            $($pins[i]).css('left', scaledLeft + 'px');
-            $($pins[i]).css('top', scaledTop + 'px');
+            $($pins[i]).css('left', (parseFloat($($pins[i]).css('left')) * data.scaleN / data.prevScaleN) + 'px');
+            $($pins[i]).css('top', (parseFloat($($pins[i]).css('top')) * data.scaleN / data.prevScaleN) + 'px');
         }
 
         // Distance from left of project content to origin (used for pins positioning when on a centered page in Scale to Fit mode)
@@ -1883,11 +1867,10 @@ var iphoneXFirstPass = true;
         } else if (message == 'setContentScale') {
             if (data.clipToView) {
                 var scaleVal = $('.vpScaleOption').find('.selectedRadioButton').parent().attr('val');
-                if (scaleVal == '2' || scaleVal == '0') {
+                if (scaleVal == '2') {
                     var scaleN = newScaleN = $('#mainPanel').width() / data.viewportWidth;
                     var hScaleN = ($('#mainPanel').height()) / data.viewportHeight;
                     if (hScaleN < scaleN) scaleN = newScaleN = hScaleN;
-                    if(scaleVal == '0') scaleN = Math.min(1, scaleN);
                     var scale = 'scale(' + scaleN + ')';
                     $('#mainPanelContainer').css({
                         'transform': scale,
@@ -1913,7 +1896,6 @@ var iphoneXFirstPass = true;
             }
             
             repositionPinsOnScaleChange(data);
-            repositionClippingBoundsScroll();
             // Fix for edge not redrawing content after scale change
             if ($axure.browser.isEdge) {
                 newHeight = window.innerHeight - ((!isMobileMode() && $('#topPanel').is(':visible')) ? $('#topPanel').height() : 0);
